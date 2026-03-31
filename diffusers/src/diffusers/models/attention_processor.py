@@ -1911,7 +1911,6 @@ class FluxAttnProcessor2_0:
             key = apply_rotary_emb(key, image_rotary_emb)
 
         token_reweight = True
-        step_list = [30]
         if token_reweight is False:
             hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
         else:
@@ -1930,6 +1929,19 @@ class FluxAttnProcessor2_0:
                 hidden_states[:, :, img_len+txt_len:, :] += 0.3*demo_txt
             else:    
                 hidden_states = attn_weight @ value
+            
+            # Head-wise reweighting
+            sub_attn = attn_weight[:, :, txt_len + img_len :, :txt_len]
+            head_scores = sub_attn.sum(dim=(-2, -1))
+
+            head_min = head_scores.min(dim=1, keepdim=True).values
+            head_max = head_scores.max(dim=1, keepdim=True).values
+            eps = torch.finfo(head_scores.dtype).eps
+            head_weights = (head_scores - head_min) / (head_max - head_min + eps)
+            head_weights = head_weights * 0.2 + 1.0
+            head_weights = head_weights.unsqueeze(-1).unsqueeze(-1)
+
+            hidden_states = hidden_states * head_weights
             
 
         # hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
